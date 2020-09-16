@@ -8,18 +8,33 @@
 #include "util/numautils.h"
 #include "util/pmem.h"
 
+#include <object_io.h>
+#include <cut_split.h>
+#include <tuple_merge.h>
+#include <serial_nuevomatch.h>
+#include <nuevomatch_config.h>
+
 #define USE_PMEM false
 
 #if USE_PMEM == true
 #include <libpmem.h>
 #endif
 
+#define CLASSIFICATION_HEADER_WORDS 3
+struct classification_hdr_t {
+  uint64_t egr_ts; // switch sends req
+  uint64_t ingress_mac_tstamp; // switch receives resp
+  uint32_t trace_idx;
+  int32_t match_priority;
+  uint64_t headers[CLASSIFICATION_HEADER_WORDS];
+} __attribute__((packed));
+
 static constexpr size_t kAppEvLoopMs = 1000;  // Duration of event loop
 static constexpr bool kAppVerbose = false;    // Print debug info on datapath
 static constexpr double kAppLatFac = 10.0;    // Precision factor for latency
 static constexpr size_t kAppReqType = 1;      // eRPC request type
 
-static constexpr size_t kAppRespSize = 8;
+static constexpr size_t kAppRespSize = sizeof(struct classification_hdr_t);
 static constexpr size_t kAppMinReqSize = 64;
 static constexpr size_t kAppMaxReqSize = 1024;
 
@@ -35,6 +50,7 @@ class ServerContext : public BasicAppContext {
  public:
   size_t file_offset = 0;
   uint8_t *pbuf;
+  SerialNuevoMatch<1>* classifier;
 };
 
 class ClientContext : public BasicAppContext {
@@ -43,6 +59,9 @@ class ClientContext : public BasicAppContext {
   size_t req_size;  // Between kAppMinReqSize and kAppMaxReqSize
   erpc::Latency latency;
   erpc::MsgBuffer req_msgbuf, resp_msgbuf;
+  trace_packet* trace_packets;
+  uint32_t num_of_packets;
+  volatile uint32_t next_trace_idx = 0;
   ~ClientContext() {}
 };
 
@@ -57,10 +76,23 @@ void req_handler(erpc::ReqHandle *req_handle, void *_context) {
 
   c->file_offset += copy_size;
 #endif
+  const auto *req_msgbuf = req_handle->get_req_msgbuf();
+  assert(req_msgbuf->get_data_size() == sizeof(struct classification_hdr_t));
+  auto *req = reinterpret_cast<const struct classification_hdr_t *>(req_msgbuf->buf);
 
-  erpc::Rpc<erpc::CTransport>::resize_msg_buffer(&req_handle->pre_resp_msgbuf,
-                                                 kAppRespSize);
-  c->rpc->enqueue_response(req_handle, &req_handle->pre_resp_msgbuf);
+  auto &resp_msgbuf  = req_handle->pre_resp_msgbuf;
+  erpc::Rpc<erpc::CTransport>::resize_msg_buffer(&resp_msgbuf, kAppRespSize);
+  auto *resp = reinterpret_cast<struct classification_hdr_t *>(resp_msgbuf.buf);
+
+#if 1
+  classifier_output_t out = c->classifier->classify((uint32_t*)req->headers);
+  resp->match_priority = out.action;
+#endif
+  resp->trace_idx = req->trace_idx;
+  resp->egr_ts = req->egr_ts;
+  resp->ingress_mac_tstamp = req->ingress_mac_tstamp;
+
+  c->rpc->enqueue_response(req_handle, &resp_msgbuf);
 }
 
 void server_func(erpc::Nexus *nexus) {
@@ -78,6 +110,32 @@ void server_func(erpc::Nexus *nexus) {
   pmem_memset_persist(c.pbuf, 0, kAppPmemFileSize);
   printf("done.\n");
 #endif
+
+	// Set configuration for NuevoMatch
+	NuevoMatchConfig config;
+	config.num_of_cores = 1;
+	config.max_subsets = 1;
+	config.start_from_iset = 0;
+	config.disable_isets = false;
+	config.disable_remainder = false;
+	config.disable_bin_search = false;
+	config.disable_validation_phase = false;
+	config.disable_all_classification = false;
+	//config.force_rebuilding_remainder = true;
+	config.force_rebuilding_remainder = false;
+
+	uint32_t binth = 8;
+	uint32_t threshold = 25;
+  config.remainder_classifier = new CutSplit(binth, threshold);
+	config.remainder_type = "cutsplit";
+
+  c.classifier = new SerialNuevoMatch<1>(config);
+
+	// Read classifier file to memory
+	ObjectReader classifier_handler("nuevomatch_64.classifier");
+	c.classifier->load(classifier_handler);
+
+
 
   while (true) {
     rpc.run_event_loop(1000);
@@ -103,6 +161,15 @@ void connect_session(ClientContext &c) {
 void app_cont_func(void *, void *);
 inline void send_req(ClientContext &c) {
   c.start_tsc = erpc::rdtsc();
+  assert(c.req_msgbuf.get_data_size() == sizeof(struct classification_hdr_t));
+
+  struct classification_hdr_t * req = reinterpret_cast<struct classification_hdr_t *>(c.req_msgbuf.buf);
+  req->egr_ts = 0;
+  req->ingress_mac_tstamp = 0;
+  req->trace_idx = c.next_trace_idx;
+  req->match_priority = 0;
+  memcpy((uint32_t *)req->headers, c.trace_packets[req->trace_idx].get(), CLASSIFICATION_HEADER_WORDS*8);
+  c.next_trace_idx = (c.next_trace_idx+1) % c.num_of_packets;
   c.rpc->enqueue_request(c.session_num_vec[0], kAppReqType, &c.req_msgbuf,
                          &c.resp_msgbuf, app_cont_func, nullptr);
 }
@@ -111,8 +178,28 @@ void app_cont_func(void *_context, void *) {
   auto *c = static_cast<ClientContext *>(_context);
   assert(c->resp_msgbuf.get_data_size() == kAppRespSize);
 
+  erpc::rt_assert(c->resp_msgbuf.get_data_size() == sizeof(struct classification_hdr_t),
+                  "Invalid response size");
+  auto *resp = reinterpret_cast<struct classification_hdr_t *>(c->resp_msgbuf.buf);
+  assert(resp->trace_idx < c->num_of_packets);
+#if 0
+  if (resp->match_priority != c->trace_packets[resp->trace_idx].match_priority)
+    printf("WARNING: trace_idx %u match_priority %d (should be %d)\n", resp->trace_idx, resp->match_priority, c->trace_packets[resp->trace_idx].match_priority);
+#endif
+#if 0
+  else printf("MATCHED!!!!!!!1 trace_idx %u match_priority %d (should be %d)\n", resp->trace_idx, resp->match_priority, c->trace_packets[resp->trace_idx].match_priority);
+#endif
+  uint64_t egr_ts = be64toh(resp->egr_ts) >> 16;
+  uint64_t ingr_ts = be64toh(resp->ingress_mac_tstamp) >> 16;
+  uint32_t lat_ns = ingr_ts - egr_ts;
+  //printf("egr_ts: 0x%lx    ingress_mac_tstamp: 0x%lx   latency: %ldns\n", egr_ts, ingr_ts, lat_ns);
+
+#if 0
   double req_lat_us =
       erpc::to_usec(erpc::rdtsc() - c->start_tsc, c->rpc->get_freq_ghz());
+#else
+  double req_lat_us = lat_ns/1e3;
+#endif
   c->latency.update(static_cast<size_t>(req_lat_us * kAppLatFac));
 
   send_req(*c);
@@ -128,12 +215,22 @@ void client_func(erpc::Nexus *nexus) {
 
   rpc.retry_connect_on_invalid_rpc_id = true;
   c.rpc = &rpc;
-  c.req_size = kAppMinReqSize;
+  //c.req_size = kAppMinReqSize;
+  c.req_size = sizeof(struct classification_hdr_t);
 
   c.req_msgbuf = rpc.alloc_msg_buffer_or_die(kAppMaxReqSize);
   c.resp_msgbuf = rpc.alloc_msg_buffer_or_die(kAppMaxReqSize);
   c.rpc->resize_msg_buffer(&c.req_msgbuf, c.req_size);
   c.rpc->resize_msg_buffer(&c.resp_msgbuf, c.req_size);
+
+  // Read the textual trace file
+  const char* trace_filename = "trace";
+  vector<uint32_t> arbitrary_fields;
+  c.trace_packets = read_trace_file(trace_filename, arbitrary_fields, &c.num_of_packets);
+  if (!c.trace_packets) {
+    throw error("error while reading trace file");
+  }
+  printf("Total %u packets in trace\n", c.num_of_packets);
 
   connect_session(c);
 
@@ -148,10 +245,12 @@ void client_func(erpc::Nexus *nexus) {
            c.latency.perc(.5) / kAppLatFac, c.latency.perc(.05) / kAppLatFac,
            c.latency.perc(.99) / kAppLatFac, c.latency.perc(.999) / kAppLatFac);
 
+#if 0
     c.req_size *= 2;
     if (c.req_size > kAppMaxReqSize) c.req_size = kAppMinReqSize;
     c.rpc->resize_msg_buffer(&c.req_msgbuf, c.req_size);
     c.rpc->resize_msg_buffer(&c.resp_msgbuf, c.req_size);
+#endif
 
     c.latency.reset();
   }
@@ -159,10 +258,9 @@ void client_func(erpc::Nexus *nexus) {
 
 int main(int argc, char **argv) {
   signal(SIGINT, ctrl_c_handler);
+
   gflags::ParseCommandLineFlags(&argc, &argv, true);
-
   erpc::rt_assert(FLAGS_numa_node <= 1, "Invalid NUMA node");
-
   erpc::Nexus nexus(erpc::get_uri_for_process(FLAGS_process_id),
                     FLAGS_numa_node, 0);
   nexus.register_req_func(kAppReqType, req_handler);

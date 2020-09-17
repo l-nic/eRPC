@@ -182,7 +182,7 @@ void req_handler(erpc::ReqHandle *req_handle, void *_context) {
   for (uint32_t i = 0; i < req->num_hops; i++) {
     path_latency += hop_latencies[i];
   }
-  uint64_t nic_timestamp = req->egr_ts; // This is as close to a NIC timestamp as we can get on these machines
+  uint64_t nic_timestamp = req->ingress_mac_tstamp; // This is as close to a NIC timestamp as we can get on these machines
   if (c->flowState[flow_hash].valid && ((c->flowState[flow_hash].src_ip != req->src_ip) ||
       (c->flowState[flow_hash].dst_ip != req->dst_ip) || (c->flowState[flow_hash].src_port != req->src_port) ||
       (c->flowState[flow_hash].dst_port != req->dst_port))) {
@@ -216,6 +216,7 @@ void req_handler(erpc::ReqHandle *req_handle, void *_context) {
 
   uint64_t avg_path_latency = c->flowState[flow_hash].total_latency / c->flowState[flow_hash].num_samples;
   uint64_t abs_latency_diff = (path_latency > avg_path_latency) ? (path_latency - avg_path_latency) : (avg_path_latency - path_latency);
+  // printf("%ld\n", abs_latency_diff);
 
   if (is_fin) {
     c->flowState[flow_hash].valid = false;
@@ -308,7 +309,7 @@ void server_func(erpc::Nexus *nexus) {
 
 
   while (true) {
-    rpc.run_event_loop(1000);
+    rpc.run_event_loop(10);
     if (ctrl_c_pressed == 1) break;
   }
 }
@@ -323,7 +324,7 @@ void connect_session(ClientContext &c) {
   c.session_num_vec.push_back(session_num);
 
   while (c.num_sm_resps != 1) {
-    c.rpc->run_event_loop(kAppEvLoopMs);
+    c.rpc->run_event_loop(10);
     if (unlikely(ctrl_c_pressed == 1)) return;
   }
 }
@@ -348,6 +349,9 @@ inline void send_req(ClientContext &c) {
   uint64_t* hop_latencies_dst = reinterpret_cast<uint64_t*>(reinterpret_cast<char*>(req) + sizeof(struct int_path_latency_report_t));
   for (uint64_t i = 0; i < kNumHops; i++) {
     hop_latencies_dst[i] = kDefaultHopLatency;
+    if (i == 1 && c.report_num == 40) {
+      hop_latencies_dst[i] = 20000;
+    }
   }
   c.report_num++;
 
@@ -356,7 +360,7 @@ inline void send_req(ClientContext &c) {
   //req->match_priority = 0;
   //memcpy((uint32_t *)req->headers, c.trace_packets[req->trace_idx].get(), CLASSIFICATION_HEADER_WORDS*8);
   //c.next_trace_idx = (c.next_trace_idx+1) % c.num_of_packets;
-  if (c.report_num < kNumReports) {
+  if (c.report_num <= kNumReports) {
     c.rpc->enqueue_request(c.session_num_vec[0], kAppReqType, &c.req_msgbuf,
                            &c.resp_msgbuf, app_cont_func, nullptr);
   }
@@ -381,6 +385,18 @@ void app_cont_func(void *_context, void *) {
   uint64_t lat_ns = ingr_ts - egr_ts;
   printf("egr_ts: 0x%lx    ingress_mac_tstamp: 0x%lx   latency: %ldns\n", egr_ts, ingr_ts, lat_ns);
   printf("msg id is %ld\n", resp->msg_id);
+
+  if (resp->msg_id == RespMsgId::kDone) {
+    auto* done_resp = reinterpret_cast<struct done_message_t*>(resp);
+    uint64_t start_time = be64toh(done_resp->start_time) >> 16;
+    uint64_t overall_latency = ingr_ts - start_time;
+    printf("ingress time is %ld, start time is %ld, latency is %ld\n", ingr_ts, start_time, overall_latency);
+  } else if (resp->msg_id == RespMsgId::kAnomalyEvent) {
+    auto* anomaly_resp = reinterpret_cast<struct path_latency_anomaly_event_t*>(resp);
+    uint64_t anomaly_ts = be64toh(anomaly_resp->anomaly_timestamp) >> 16;
+    uint64_t reflex_latency = ingr_ts - anomaly_ts;
+    printf("anomaly ingress at %ld, original ts %ld, reflex latency %ld\n", ingr_ts, anomaly_ts, reflex_latency);
+  }
 
 //#if 0
 //  double req_lat_us =
@@ -427,7 +443,7 @@ void client_func(erpc::Nexus *nexus) {
 
   send_req(c);
   for (size_t i = 0; i < FLAGS_test_ms; i += 1000) {
-    rpc.run_event_loop(kAppEvLoopMs);  // 1 second
+    rpc.run_event_loop(10);  // 1 second
     if (ctrl_c_pressed == 1) break;
     // printf("%zu %.1f %.1f %.1f %.1f\n", c.req_size,
     //        c.latency.perc(.5) / kAppLatFac, c.latency.perc(.05) / kAppLatFac,

@@ -1,0 +1,57 @@
+[33mInstalling modded drivers(B[m
+[33mdo.sh: Launching process 1 on NUMA node 0(B[m
+98:084721 WARNG: Installing flow rule for Rpc 0. NUMA node = 0. Flow RX UDP port = 31882.
+98:099226 WARNG: RawTransport created for Rpc ID 0. Device mlx5_0/enp131s0f0, port 1. IPv4 10.0.1.96, MAC 98:3:9b:67:f5:c6. Datapath UDP port 31882.
+Process 1: Creating session to 10.0.1.98:31850.
+Process 1: Session connected. Starting work.
+ingress time is 13850535834838, start time is 13850535760250, latency is 74588
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 0
+reflex latency: 2485
+reflex latency: 2245
+reflex latency: 2306
+reflex latency: 2205
+reflex latency: 2913
+reflex latency: 3174
+reflex latency: 2947
+reflex latency: 2859
+reflex latency: 2861
+reflex latency: 0

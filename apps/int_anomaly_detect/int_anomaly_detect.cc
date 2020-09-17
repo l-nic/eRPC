@@ -109,7 +109,7 @@ static constexpr uint32_t kPathLatencyThresh = 1000;
 static constexpr size_t kAppEvLoopMs = 1000;  // Duration of event loop
 //static constexpr bool kAppVerbose = false;    // Print debug info on datapath
 //static constexpr double kAppLatFac = 10.0;    // Precision factor for latency
-static constexpr size_t kAppReqType = 1;      // eRPC request type
+static constexpr size_t kAppReqType = 123;      // eRPC request type
 
 //static constexpr size_t kAppRespSize = sizeof(struct classification_hdr_t);
 //static constexpr size_t kAppMinReqSize = 64;

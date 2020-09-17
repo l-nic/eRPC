@@ -160,6 +160,8 @@ class ClientContext : public BasicAppContext {
 };
 
 void req_handler(erpc::ReqHandle *req_handle, void *_context) {
+  //auto start_time_handler = erpc::rdtsc();
+
   auto *c = static_cast<ServerContext *>(_context);
 
 // #if USE_PMEM == true
@@ -182,7 +184,7 @@ void req_handler(erpc::ReqHandle *req_handle, void *_context) {
   for (uint32_t i = 0; i < req->num_hops; i++) {
     path_latency += hop_latencies[i];
   }
-  uint64_t nic_timestamp = req->ingress_mac_tstamp; // This is as close to a NIC timestamp as we can get on these machines
+  uint64_t nic_timestamp = req->egr_ts; // This is as close to a NIC timestamp as we can get on these machines
   if (c->flowState[flow_hash].valid && ((c->flowState[flow_hash].src_ip != req->src_ip) ||
       (c->flowState[flow_hash].dst_ip != req->dst_ip) || (c->flowState[flow_hash].src_port != req->src_port) ||
       (c->flowState[flow_hash].dst_port != req->dst_port))) {
@@ -256,6 +258,8 @@ void req_handler(erpc::ReqHandle *req_handle, void *_context) {
     resp->msg_id = RespMsgId::kNoUpdate;
   }
 
+  //double req_lat_us = erpc::to_usec(erpc::rdtsc() - start_time_handler, c->rpc->get_freq_ghz());
+  //printf("%lf\n", req_lat_us);
   c->rpc->enqueue_response(req_handle, &resp_msgbuf);
 }
 

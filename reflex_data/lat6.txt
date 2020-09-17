@@ -1,0 +1,116 @@
+[33mInstalling modded drivers(B[m
+[33mdo.sh: Launching process 1 on NUMA node 0(B[m
+57:252802 WARNG: Installing flow rule for Rpc 0. NUMA node = 0. Flow RX UDP port = 31882.
+57:267672 WARNG: RawTransport created for Rpc ID 0. Device mlx5_0/enp131s0f0, port 1. IPv4 10.0.1.96, MAC 98:3:9b:67:f5:c6. Datapath UDP port 31882.
+Process 1: Creating session to 10.0.1.98:31850.
+Process 1: Session connected. Starting work.
+egr_ts: 0xd03bd4835dd    ingress_mac_tstamp: 0xd03bd48943b   latency: 24158ns
+msg id is 1
+egr_ts: 0xd03bd48ce89    ingress_mac_tstamp: 0xd03bd48d80c   latency: 2435ns
+msg id is 1
+egr_ts: 0xd03bd48e8d5    ingress_mac_tstamp: 0xd03bd48f26e   latency: 2457ns
+msg id is 1
+egr_ts: 0xd03bd4901ed    ingress_mac_tstamp: 0xd03bd490afd   latency: 2320ns
+msg id is 1
+egr_ts: 0xd03bd491b52    ingress_mac_tstamp: 0xd03bd49244e   latency: 2300ns
+msg id is 1
+egr_ts: 0xd03bd4933c7    ingress_mac_tstamp: 0xd03bd493c9b   latency: 2260ns
+msg id is 1
+egr_ts: 0xd03bd494c99    ingress_mac_tstamp: 0xd03bd4955be   latency: 2341ns
+msg id is 1
+egr_ts: 0xd03bd49659b    ingress_mac_tstamp: 0xd03bd496e72   latency: 2263ns
+msg id is 1
+egr_ts: 0xd03bd497dd4    ingress_mac_tstamp: 0xd03bd498610   latency: 2108ns
+msg id is 1
+egr_ts: 0xd03bd499594    ingress_mac_tstamp: 0xd03bd499e29   latency: 2197ns
+msg id is 1
+egr_ts: 0xd03bd49ad76    ingress_mac_tstamp: 0xd03bd49b68b   latency: 2325ns
+msg id is 1
+egr_ts: 0xd03bd49c5cb    ingress_mac_tstamp: 0xd03bd49ce9f   latency: 2260ns
+msg id is 1
+egr_ts: 0xd03bd49dd5a    ingress_mac_tstamp: 0xd03bd49e634   latency: 2266ns
+msg id is 1
+egr_ts: 0xd03bd49f4fc    ingress_mac_tstamp: 0xd03bd49fe23   latency: 2343ns
+msg id is 1
+egr_ts: 0xd03bd4a0e15    ingress_mac_tstamp: 0xd03bd4a173e   latency: 2345ns
+msg id is 1
+egr_ts: 0xd03bd4a26bd    ingress_mac_tstamp: 0xd03bd4a2fd8   latency: 2331ns
+msg id is 1
+egr_ts: 0xd03bd4a3eee    ingress_mac_tstamp: 0xd03bd4a47cd   latency: 2271ns
+msg id is 1
+egr_ts: 0xd03bd4a5731    ingress_mac_tstamp: 0xd03bd4a604c   latency: 2331ns
+msg id is 1
+egr_ts: 0xd03bd4a6f06    ingress_mac_tstamp: 0xd03bd4a77d1   latency: 2251ns
+msg id is 1
+egr_ts: 0xd03bd4a867c    ingress_mac_tstamp: 0xd03bd4a8f95   latency: 2329ns
+msg id is 1
+egr_ts: 0xd03bd4a9ed2    ingress_mac_tstamp: 0xd03bd4aa70e   latency: 2108ns
+msg id is 1
+egr_ts: 0xd03bd4ab5f9    ingress_mac_tstamp: 0xd03bd4abf2e   latency: 2357ns
+msg id is 1
+egr_ts: 0xd03bd4ace02    ingress_mac_tstamp: 0xd03bd4ad72f   latency: 2349ns
+msg id is 1
+egr_ts: 0xd03bd4ae667    ingress_mac_tstamp: 0xd03bd4aef27   latency: 2240ns
+msg id is 1
+egr_ts: 0xd03bd4afdce    ingress_mac_tstamp: 0xd03bd4b0618   latency: 2122ns
+msg id is 1
+egr_ts: 0xd03bd4b1555    ingress_mac_tstamp: 0xd03bd4b1e17   latency: 2242ns
+msg id is 1
+egr_ts: 0xd03bd4b2d18    ingress_mac_tstamp: 0xd03bd4b3655   latency: 2365ns
+msg id is 1
+egr_ts: 0xd03bd4b4544    ingress_mac_tstamp: 0xd03bd4b4e32   latency: 2286ns
+msg id is 1
+egr_ts: 0xd03bd4b5cf3    ingress_mac_tstamp: 0xd03bd4b6609   latency: 2326ns
+msg id is 1
+egr_ts: 0xd03bd4b752f    ingress_mac_tstamp: 0xd03bd4b7e46   latency: 2327ns
+msg id is 1
+egr_ts: 0xd03bd4b8d79    ingress_mac_tstamp: 0xd03bd4b9636   latency: 2237ns
+msg id is 1
+egr_ts: 0xd03bd4ba5bb    ingress_mac_tstamp: 0xd03bd4baefe   latency: 2371ns
+msg id is 1
+egr_ts: 0xd03bd4bbe0c    ingress_mac_tstamp: 0xd03bd4bc6b1   latency: 2213ns
+msg id is 1
+egr_ts: 0xd03bd4bd5c4    ingress_mac_tstamp: 0xd03bd4bdebf   latency: 2299ns
+msg id is 1
+egr_ts: 0xd03bd4bede0    ingress_mac_tstamp: 0xd03bd4bf6ba   latency: 2266ns
+msg id is 1
+egr_ts: 0xd03bd4c05c1    ingress_mac_tstamp: 0xd03bd4c0eb0   latency: 2287ns
+msg id is 1
+egr_ts: 0xd03bd4c1e5d    ingress_mac_tstamp: 0xd03bd4c2721   latency: 2244ns
+msg id is 1
+egr_ts: 0xd03bd4c367b    ingress_mac_tstamp: 0xd03bd4c3f5f   latency: 2276ns
+msg id is 1
+egr_ts: 0xd03bd4c4ef6    ingress_mac_tstamp: 0xd03bd4c5820   latency: 2346ns
+msg id is 1
+egr_ts: 0xd03bd4c67d6    ingress_mac_tstamp: 0xd03bd4c70e3   latency: 2317ns
+msg id is 1
+egr_ts: 0xd03bd4c80e5    ingress_mac_tstamp: 0xd03bd4c89ca   latency: 2277ns
+msg id is 2
+anomaly ingress at 14309711972810, original ts 14309711970533, reflex latency 2277
+egr_ts: 0xd03bd4c9d21    ingress_mac_tstamp: 0xd03bd4ca61a   latency: 2297ns
+msg id is 2
+anomaly ingress at 14309711980058, original ts 14309711977761, reflex latency 2297
+egr_ts: 0xd03bd4cb7e7    ingress_mac_tstamp: 0xd03bd4cc130   latency: 2377ns
+msg id is 2
+anomaly ingress at 14309711986992, original ts 14309711984615, reflex latency 2377
+egr_ts: 0xd03bd4d6688    ingress_mac_tstamp: 0xd03bd4d7006   latency: 2430ns
+msg id is 2
+anomaly ingress at 14309712031750, original ts 14309712029320, reflex latency 2430
+egr_ts: 0xd03bd4d813f    ingress_mac_tstamp: 0xd03bd4d8a2a   latency: 2283ns
+msg id is 2
+anomaly ingress at 14309712038442, original ts 14309712036159, reflex latency 2283
+egr_ts: 0xd03bd4d9b38    ingress_mac_tstamp: 0xd03bd4da451   latency: 2329ns
+msg id is 2
+anomaly ingress at 14309712045137, original ts 14309712042808, reflex latency 2329
+egr_ts: 0xd03bd4db5b1    ingress_mac_tstamp: 0xd03bd4dbe94   latency: 2275ns
+msg id is 2
+anomaly ingress at 14309712051860, original ts 14309712049585, reflex latency 2275
+egr_ts: 0xd03bd4dcf46    ingress_mac_tstamp: 0xd03bd4dd81e   latency: 2264ns
+msg id is 2
+anomaly ingress at 14309712058398, original ts 14309712056134, reflex latency 2264
+egr_ts: 0xd03bd4de892    ingress_mac_tstamp: 0xd03bd4df1e0   latency: 2382ns
+msg id is 2
+anomaly ingress at 14309712064992, original ts 14309712062610, reflex latency 2382
+egr_ts: 0xd03bd4e02dd    ingress_mac_tstamp: 0xd03bd4e0c37   latency: 2394ns
+msg id is 3
+ingress time is 14309712071735, start time is 14309711689181, latency is 382554

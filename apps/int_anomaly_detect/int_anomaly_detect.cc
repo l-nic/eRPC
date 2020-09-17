@@ -63,9 +63,7 @@ struct path_latency_anomaly_event_t {
   // nanoPU word 4
   uint64_t path_latency;
 
-  // nanoPU word 5
-  uint32_t timestamp; // TODO: These probably need to be changed
-  uint32_t latency;
+  uint64_t anomaly_timestamp;
 } __attribute__((packed));
 
 struct done_message_t {
@@ -77,8 +75,7 @@ struct done_message_t {
   uint64_t msg_id;
 
   // nanoPU word 2
-  uint32_t timestamp;
-  uint32_t latency;
+  uint64_t start_time;
 } __attribute__((packed));
 
 struct no_update_t {
@@ -90,6 +87,10 @@ struct no_update_t {
   uint64_t msg_id;
 } __attribute__((packed));
 
+enum RespMsgId {
+  kError, kNoUpdate, kAnomalyEvent, kDone
+};
+
 static constexpr uint32_t kNumHops = 4;
 static constexpr uint32_t kResponseBufSize = sizeof(struct path_latency_anomaly_event_t);
 static constexpr uint32_t kRequestBufSize = sizeof(struct int_path_latency_report_t) + kNumHops*sizeof(uint64_t);
@@ -98,10 +99,12 @@ static constexpr uint32_t kReportDstIp = 0x0a030303;
 static constexpr uint16_t kFlowId = 0;
 static constexpr uint8_t kDataFlagMask = 0x1;
 static constexpr uint8_t kStartFlagMask = 0x2;
+static constexpr uint8_t kFinFlagMask = 0x4;
 static constexpr uint32_t kDefaultHopLatency = 100;
 static constexpr uint32_t kNumReports = 50;
-
-uint32_t global_report_num = 0;
+static constexpr uint32_t kMaxNumFlows = 256;
+static constexpr uint32_t kMaxNumSamples = 10;
+static constexpr uint32_t kPathLatencyThresh = 1000;
 
 static constexpr size_t kAppEvLoopMs = 1000;  // Duration of event loop
 //static constexpr bool kAppVerbose = false;    // Print debug info on datapath
@@ -120,11 +123,27 @@ static constexpr size_t kAppMaxReqSize = 1024;
 volatile sig_atomic_t ctrl_c_pressed = 0;
 void ctrl_c_handler(int) { ctrl_c_pressed = 1; }
 
+struct flow_state_t {
+  bool valid;
+  uint32_t src_ip;
+  uint32_t dst_ip;
+  uint16_t src_port;
+  uint16_t dst_port;
+  uint8_t num_samples;
+  uint8_t buf_ptr;
+  uint64_t latencies[kMaxNumSamples];
+  uint64_t total_latency;
+};
+
 class ServerContext : public BasicAppContext {
  public:
   //size_t file_offset = 0;
   //uint8_t *pbuf;
   //SerialNuevoMatch<1>* classifier;
+  uint64_t start_time;
+  bool first_recvd;
+  flow_state_t flowState[kMaxNumFlows];
+  uint32_t total_report_count;
 };
 
 class ClientContext : public BasicAppContext {
@@ -133,6 +152,7 @@ class ClientContext : public BasicAppContext {
   //size_t req_size;  // Between kAppMinReqSize and kAppMaxReqSize
   //erpc::Latency latency;
   erpc::MsgBuffer req_msgbuf, resp_msgbuf;
+  uint32_t report_num;
   //trace_packet* trace_packets;
   //uint32_t num_of_packets;
   //volatile uint32_t next_trace_idx = 0;
@@ -153,20 +173,87 @@ void req_handler(erpc::ReqHandle *req_handle, void *_context) {
   const auto *req_msgbuf = req_handle->get_req_msgbuf();
   assert(req_msgbuf->get_data_size() == kRequestBufSize);
   auto *req = reinterpret_cast<const struct int_path_latency_report_t*>(req_msgbuf->buf);
+  const uint64_t* hop_latencies = reinterpret_cast<const uint64_t*>(reinterpret_cast<const char*>(req) + sizeof(struct int_path_latency_report_t));
+
+  uint16_t flow_hash = req->dst_port;
+  bool is_start = (req->flow_flags & kStartFlagMask) > 0;
+  bool is_fin = ((req->flow_flags) & kFinFlagMask) > 0;
+  uint64_t path_latency = 0;
+  for (uint32_t i = 0; i < req->num_hops; i++) {
+    path_latency += hop_latencies[i];
+  }
+  uint64_t nic_timestamp = req->egr_ts; // This is as close to a NIC timestamp as we can get on these machines
+  if (c->flowState[flow_hash].valid && ((c->flowState[flow_hash].src_ip != req->src_ip) ||
+      (c->flowState[flow_hash].dst_ip != req->dst_ip) || (c->flowState[flow_hash].src_port != req->src_port) ||
+      (c->flowState[flow_hash].dst_port != req->dst_port))) {
+    printf("ERROR: flow hash collision!\n");
+    assert(false);
+    return;
+  }
+  if (is_start) {
+    c->flowState[flow_hash].num_samples = 0;
+    c->flowState[flow_hash].buf_ptr = 0;
+    c->flowState[flow_hash].total_latency = 0;
+  }
+
+  c->flowState[flow_hash].valid = true;
+  c->flowState[flow_hash].src_ip = req->src_ip;
+  c->flowState[flow_hash].dst_ip = req->dst_ip;
+  c->flowState[flow_hash].src_port = req->src_port;
+  c->flowState[flow_hash].dst_port = req->dst_port;
+  if (c->flowState[flow_hash].num_samples == kMaxNumSamples) {
+    uint64_t old_latency = c->flowState[flow_hash].latencies[c->flowState[flow_hash].buf_ptr];
+    c->flowState[flow_hash].latencies[c->flowState[flow_hash].buf_ptr] = path_latency;
+    c->flowState[flow_hash].total_latency = c->flowState[flow_hash].total_latency + path_latency - old_latency;
+  } else {
+    c->flowState[flow_hash].latencies[c->flowState[flow_hash].buf_ptr] = path_latency;
+    c->flowState[flow_hash].total_latency += path_latency;
+    c->flowState[flow_hash].num_samples += 1;  
+  }
+
+  c->flowState[flow_hash].buf_ptr += 1;
+  c->flowState[flow_hash].buf_ptr = c->flowState[flow_hash].buf_ptr % kMaxNumSamples;
+
+  uint64_t avg_path_latency = c->flowState[flow_hash].total_latency / c->flowState[flow_hash].num_samples;
+  uint64_t abs_latency_diff = (path_latency > avg_path_latency) ? (path_latency - avg_path_latency) : (avg_path_latency - path_latency);
+
+  if (is_fin) {
+    c->flowState[flow_hash].valid = false;
+  }
+
+  if (!c->first_recvd) {
+    c->start_time = nic_timestamp;
+    c->first_recvd = true;
+  }
+  c->total_report_count++;
 
   auto &resp_msgbuf  = req_handle->pre_resp_msgbuf;
   erpc::Rpc<erpc::CTransport>::resize_msg_buffer(&resp_msgbuf, kResponseBufSize);
-  auto *resp = reinterpret_cast<struct no_update_t *>(resp_msgbuf.buf);
 
-  // TODO: Actually do something with the int report on the server-side
-
-//#if 1
-//  classifier_output_t out = c->classifier->classify((uint32_t*)req->headers);
-  //resp->match_priority = out.action;
-//#endif
-  //resp->trace_idx = req->trace_idx;
-  resp->egr_ts = req->egr_ts;
-  resp->ingress_mac_tstamp = req->ingress_mac_tstamp;
+  if (c->total_report_count == kNumReports) {
+    auto *resp = reinterpret_cast<struct done_message_t *>(resp_msgbuf.buf);
+    resp->egr_ts = req->egr_ts;
+    resp->ingress_mac_tstamp = req->ingress_mac_tstamp;
+    resp->msg_id = RespMsgId::kDone;
+    resp->start_time = c->start_time;
+    c->total_report_count = 0;
+  } else if (abs_latency_diff > kPathLatencyThresh) {
+    auto *resp = reinterpret_cast<struct path_latency_anomaly_event_t *>(resp_msgbuf.buf);
+    resp->egr_ts = req->egr_ts;
+    resp->ingress_mac_tstamp = req->ingress_mac_tstamp;
+    resp->msg_id = RespMsgId::kAnomalyEvent;
+    resp->src_ip = c->flowState[flow_hash].src_ip;
+    resp->dst_ip = c->flowState[flow_hash].dst_ip;
+    resp->src_port = c->flowState[flow_hash].src_port;
+    resp->dst_port = c->flowState[flow_hash].dst_port;
+    resp->path_latency = path_latency;
+    resp->anomaly_timestamp = nic_timestamp;
+  } else {
+    auto *resp = reinterpret_cast<struct no_update_t *>(resp_msgbuf.buf);
+    resp->egr_ts = req->egr_ts;
+    resp->ingress_mac_tstamp = req->ingress_mac_tstamp;
+    resp->msg_id = RespMsgId::kNoUpdate;
+  }
 
   c->rpc->enqueue_response(req_handle, &resp_msgbuf);
 }
@@ -179,6 +266,13 @@ void server_func(erpc::Nexus *nexus) {
   erpc::Rpc<erpc::CTransport> rpc(nexus, static_cast<void *>(&c), 0 /* tid */,
                                   basic_sm_handler, phy_port);
   c.rpc = &rpc;
+
+  c.first_recvd = false;
+  c.start_time = 0;
+  c.total_report_count = 0;
+  for (uint32_t i = 0; i < kMaxNumFlows; i++) {
+    c.flowState[i].valid = false;
+  }
 
 // #if USE_PMEM == true
 //   printf("Mapping pmem file...");
@@ -247,7 +341,7 @@ inline void send_req(ClientContext &c) {
   req->dst_port = kFlowId;
   req->proto = 0;
   req->flow_flags = kDataFlagMask;
-  if (global_report_num == 0) {
+  if (c.report_num == 0) {
     req->flow_flags |= kStartFlagMask;
   }
   req->num_hops = kNumHops;
@@ -255,14 +349,14 @@ inline void send_req(ClientContext &c) {
   for (uint64_t i = 0; i < kNumHops; i++) {
     hop_latencies_dst[i] = kDefaultHopLatency;
   }
-  global_report_num++;
+  c.report_num++;
 
 
   //req->trace_idx = c.next_trace_idx;
   //req->match_priority = 0;
   //memcpy((uint32_t *)req->headers, c.trace_packets[req->trace_idx].get(), CLASSIFICATION_HEADER_WORDS*8);
   //c.next_trace_idx = (c.next_trace_idx+1) % c.num_of_packets;
-  if (global_report_num < kNumReports) {
+  if (c.report_num < kNumReports) {
     c.rpc->enqueue_request(c.session_num_vec[0], kAppReqType, &c.req_msgbuf,
                            &c.resp_msgbuf, app_cont_func, nullptr);
   }
@@ -286,6 +380,7 @@ void app_cont_func(void *_context, void *) {
   uint64_t ingr_ts = be64toh(resp->ingress_mac_tstamp) >> 16;
   uint64_t lat_ns = ingr_ts - egr_ts;
   printf("egr_ts: 0x%lx    ingress_mac_tstamp: 0x%lx   latency: %ldns\n", egr_ts, ingr_ts, lat_ns);
+  printf("msg id is %ld\n", resp->msg_id);
 
 //#if 0
 //  double req_lat_us =
@@ -314,6 +409,7 @@ void client_func(erpc::Nexus *nexus) {
   //c.req_size = kRequestBufSize;
   c.rpc->resize_msg_buffer(&c.req_msgbuf, kRequestBufSize);
   c.rpc->resize_msg_buffer(&c.resp_msgbuf, kResponseBufSize);
+  c.report_num = 0;
 
   // Read the textual trace file
   // const char* trace_filename = "trace";

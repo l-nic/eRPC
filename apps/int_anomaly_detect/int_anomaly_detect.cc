@@ -151,8 +151,10 @@ class ClientContext : public BasicAppContext {
   //size_t start_tsc;
   //size_t req_size;  // Between kAppMinReqSize and kAppMaxReqSize
   //erpc::Latency latency;
-  erpc::MsgBuffer req_msgbuf, resp_msgbuf;
-  uint32_t report_num;
+  erpc::MsgBuffer req_msgbuf[kNumReports];
+  erpc::MsgBuffer resp_msgbuf[kNumReports];
+  uint64_t resp_reflex[kNumReports];
+  //uint32_t report_num;
   //trace_packet* trace_packets;
   //uint32_t num_of_packets;
   //volatile uint32_t next_trace_idx = 0;
@@ -313,7 +315,7 @@ void server_func(erpc::Nexus *nexus) {
 
 
   while (true) {
-    rpc.run_event_loop(10);
+    rpc.run_event_loop(5);
     if (ctrl_c_pressed == 1) break;
   }
 }
@@ -334,10 +336,10 @@ void connect_session(ClientContext &c) {
 }
 
 void app_cont_func(void *, void *);
-inline void send_req(ClientContext &c) {
+inline void send_req(ClientContext &c, uint32_t batch_index) {
   // c.start_tsc = erpc::rdtsc();
-  assert(c.req_msgbuf.get_data_size() == kRequestBufSize);
-  struct int_path_latency_report_t* req = reinterpret_cast<struct int_path_latency_report_t *>(c.req_msgbuf.buf);
+  assert(c.req_msgbuf[batch_index].get_data_size() == kRequestBufSize);
+  struct int_path_latency_report_t* req = reinterpret_cast<struct int_path_latency_report_t *>(c.req_msgbuf[batch_index].buf);
   req->egr_ts = 0;
   req->ingress_mac_tstamp = 0;
   req->src_ip = kReportSrcIp;
@@ -346,36 +348,40 @@ inline void send_req(ClientContext &c) {
   req->dst_port = kFlowId;
   req->proto = 0;
   req->flow_flags = kDataFlagMask;
-  if (c.report_num == 0) {
+  if (batch_index == 0) {
     req->flow_flags |= kStartFlagMask;
   }
   req->num_hops = kNumHops;
   uint64_t* hop_latencies_dst = reinterpret_cast<uint64_t*>(reinterpret_cast<char*>(req) + sizeof(struct int_path_latency_report_t));
   for (uint64_t i = 0; i < kNumHops; i++) {
     hop_latencies_dst[i] = kDefaultHopLatency;
-    if (i == 1 && c.report_num == 40) {
+    if (i == 1 && batch_index == 40) {
       hop_latencies_dst[i] = 20000;
     }
   }
-  c.report_num++;
+  //printf("%d\n", batch_index);
 
 
   //req->trace_idx = c.next_trace_idx;
   //req->match_priority = 0;
   //memcpy((uint32_t *)req->headers, c.trace_packets[req->trace_idx].get(), CLASSIFICATION_HEADER_WORDS*8);
   //c.next_trace_idx = (c.next_trace_idx+1) % c.num_of_packets;
-  if (c.report_num <= kNumReports) {
-    c.rpc->enqueue_request(c.session_num_vec[0], kAppReqType, &c.req_msgbuf,
-                           &c.resp_msgbuf, app_cont_func, nullptr);
-  }
+  //if (c.report_num <= kNumReports) {
+  c.rpc->enqueue_request(c.session_num_vec[0], kAppReqType, &c.req_msgbuf[batch_index],
+                         &c.resp_msgbuf[batch_index], app_cont_func, reinterpret_cast<void*>(batch_index));
+  //}
 }
 
-void app_cont_func(void *_context, void *) {
+int global_count = 0;
+
+void app_cont_func(void *_context, void *_tag) {
+  //printf("app cont\n");
   auto *c = static_cast<ClientContext *>(_context);
-  assert(c->resp_msgbuf.get_data_size() == kResponseBufSize);
-  erpc::rt_assert(c->resp_msgbuf.get_data_size() == kResponseBufSize,
+  uint64_t batch_index = reinterpret_cast<uint64_t>(_tag);
+  assert(c->resp_msgbuf[batch_index].get_data_size() == kResponseBufSize);
+  erpc::rt_assert(c->resp_msgbuf[batch_index].get_data_size() == kResponseBufSize,
                   "Invalid response size");
-  auto* resp = reinterpret_cast<struct no_update_t*>(c->resp_msgbuf.buf);
+  auto* resp = reinterpret_cast<struct no_update_t*>(c->resp_msgbuf[batch_index].buf);
   //assert(resp->trace_idx < c->num_of_packets);
 //#if 0
 //  if (resp->match_priority != c->trace_packets[resp->trace_idx].match_priority)
@@ -384,22 +390,28 @@ void app_cont_func(void *_context, void *) {
 //#if 0
   //else printf("MATCHED!!!!!!!1 trace_idx %u match_priority %d (should be %d)\n", resp->trace_idx, resp->match_priority, c->trace_packets[resp->trace_idx].match_priority);
 //#endif
-  uint64_t egr_ts = be64toh(resp->egr_ts) >> 16;
+  //uint64_t egr_ts = be64toh(resp->egr_ts) >> 16;
   uint64_t ingr_ts = be64toh(resp->ingress_mac_tstamp) >> 16;
-  uint64_t lat_ns = ingr_ts - egr_ts;
-  printf("egr_ts: 0x%lx    ingress_mac_tstamp: 0x%lx   latency: %ldns\n", egr_ts, ingr_ts, lat_ns);
-  printf("msg id is %ld\n", resp->msg_id);
+  //uint64_t lat_ns = ingr_ts - egr_ts;
+  //printf("egr_ts: 0x%ld    ingress_mac_tstamp: 0x%ld   latency: %ldns\n", egr_ts, ingr_ts, lat_ns);
+  //printf("msg id is %ld\n", resp->msg_id);
+  //printf("global count is %d\n", global_count);
+  global_count++;
 
   if (resp->msg_id == RespMsgId::kDone) {
     auto* done_resp = reinterpret_cast<struct done_message_t*>(resp);
     uint64_t start_time = be64toh(done_resp->start_time) >> 16;
     uint64_t overall_latency = ingr_ts - start_time;
     printf("ingress time is %ld, start time is %ld, latency is %ld\n", ingr_ts, start_time, overall_latency);
+    for (uint32_t i = 0; i < kNumReports; i++) {
+      printf("reflex latency: %ld\n", c->resp_reflex[i]);
+    }
   } else if (resp->msg_id == RespMsgId::kAnomalyEvent) {
     auto* anomaly_resp = reinterpret_cast<struct path_latency_anomaly_event_t*>(resp);
     uint64_t anomaly_ts = be64toh(anomaly_resp->anomaly_timestamp) >> 16;
     uint64_t reflex_latency = ingr_ts - anomaly_ts;
-    printf("anomaly ingress at %ld, original ts %ld, reflex latency %ld\n", ingr_ts, anomaly_ts, reflex_latency);
+    c->resp_reflex[batch_index] = reflex_latency;
+    //printf("anomaly ingress at %ld, original ts %ld, reflex latency %ld\n", ingr_ts, anomaly_ts, reflex_latency);
   }
 
 //#if 0
@@ -410,7 +422,7 @@ void app_cont_func(void *_context, void *) {
 //#endif
 //  c->latency.update(static_cast<size_t>(req_lat_us * kAppLatFac));
 
-  send_req(*c);
+  //send_req(*c);
 }
 
 void client_func(erpc::Nexus *nexus) {
@@ -422,14 +434,16 @@ void client_func(erpc::Nexus *nexus) {
                                   basic_sm_handler, phy_port);
   rpc.retry_connect_on_invalid_rpc_id = true;
   c.rpc = &rpc;
-  c.req_msgbuf = rpc.alloc_msg_buffer_or_die(kAppMaxReqSize);
-  c.resp_msgbuf = rpc.alloc_msg_buffer_or_die(kAppMaxReqSize);
 
-  // INT-specific eRPC configuration
-  //c.req_size = kRequestBufSize;
-  c.rpc->resize_msg_buffer(&c.req_msgbuf, kRequestBufSize);
-  c.rpc->resize_msg_buffer(&c.resp_msgbuf, kResponseBufSize);
-  c.report_num = 0;
+  for (uint32_t batch_index = 0; batch_index < kNumReports; batch_index++) {
+    c.req_msgbuf[batch_index] = rpc.alloc_msg_buffer_or_die(kAppMaxReqSize);
+    c.resp_msgbuf[batch_index] = rpc.alloc_msg_buffer_or_die(kAppMaxReqSize);
+
+    // INT-specific eRPC configuration
+    //c.req_size = kRequestBufSize;
+    c.rpc->resize_msg_buffer(&c.req_msgbuf[batch_index], kRequestBufSize);
+    c.rpc->resize_msg_buffer(&c.resp_msgbuf[batch_index], kResponseBufSize);
+  }
 
   // Read the textual trace file
   // const char* trace_filename = "trace";
@@ -445,9 +459,13 @@ void client_func(erpc::Nexus *nexus) {
   printf("Process %zu: Session connected. Starting work.\n", FLAGS_process_id);
   // printf("write_size median_us 5th_us 99th_us 999th_us\n");
 
-  send_req(c);
+  for (uint32_t batch_index = 0; batch_index < kNumReports; batch_index++) {
+    //printf("sending index %d\n", batch_index);
+    send_req(c, batch_index);
+  }
+  //printf("sent all reqs\n");
   for (size_t i = 0; i < FLAGS_test_ms; i += 1000) {
-    rpc.run_event_loop(10);  // 1 second
+    rpc.run_event_loop(5);  // 1 second
     if (ctrl_c_pressed == 1) break;
     // printf("%zu %.1f %.1f %.1f %.1f\n", c.req_size,
     //        c.latency.perc(.5) / kAppLatFac, c.latency.perc(.05) / kAppLatFac,
